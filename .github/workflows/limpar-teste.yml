@@ -1,0 +1,49 @@
+name: Limpeza final dos testes de extracao
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/limpar-teste.yml]
+  workflow_dispatch:
+permissions:
+  actions: write
+  contents: write
+jobs:
+  clean:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Remover artefatos gerados
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api --paginate "repos/$GITHUB_REPOSITORY/actions/artifacts?per_page=100" --jq '.artifacts[].id' | while read -r id; do
+            test -n "$id" || continue
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/$id"
+            echo "Artefato apagado: $id"
+          done
+      - name: Remover as cinco branches de extracao
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for branch in \
+            tools/split-ilspy-20261030 \
+            tools/workshop-3829023541-ilspy \
+            tools/better-zoom-extract \
+            tools/lanternslot-3814375974 \
+            tools/workshop-3788179806-extract; do
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$branch"
+            echo "Branch apagada: $branch"
+          done
+      - name: Remover historicos anteriores de execucao
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for id in 41127204340 41126838269 41125953897 41125921835 41125103138 41123713335 41123582855; do
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/runs/$id" || echo "Run nao removida: $id"
+          done
