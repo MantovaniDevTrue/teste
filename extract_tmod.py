@@ -14,10 +14,13 @@ MAX_ENTRY_BYTES = 512 * 1024 * 1024
 
 def parse_tmod(path):
     source = Path(path).read_bytes()
-    if source[:5] != b"TMOD\n":
-        raise ValueError("Cabecalho TMOD invalido: " + source[:64].hex(" ") + " repr=" + repr(source[:32]))
-    tml_version = source[5:15].decode("ascii", errors="replace").rstrip("\0")
-    position = 295
+    if source[:4] != b"TMOD":
+        raise ValueError("Cabecalho TMOD invalido: " + source[:32].hex(" "))
+    version_length = source[4]
+    if not 1 <= version_length <= 40:
+        raise ValueError("Comprimento da versao tModLoader invalido")
+    tml_version = source[5:5+version_length].decode("ascii")
+    position = 5 + version_length + 280
 
     def read_string():
         nonlocal position
