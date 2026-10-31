@@ -1,0 +1,124 @@
+name: Elaina Wandering Witch - extrair fontes e texturas
+on:
+  push:
+    branches: [tools/elaina-2850199955-ilspy]
+    paths:
+      - .github/workflows/elaina-ilspy.yml
+      - extract_tmod.py
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download Steam Workshop item 2850199955
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p steam
+          chmod 777 steam
+          docker run --rm -v "$PWD/steam:/workshop" cm2network/steamcmd:steam bash -lc 'cd /home/steam/steamcmd && ./steamcmd.sh +force_install_dir /workshop +login anonymous +workshop_download_item 1281930 2850199955 +quit' 2>&1 | tee steamcmd.log
+      - name: Locate tmod and select newest tModLoader build
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          found = list(Path('steam').rglob('*.tmod'))
+          print("Files:", [(str(f), f.stat().st_size) for f in found])
+          if not found:
+              raise SystemExit('No .tmod retrieved. Steam may require access/authentication.')
+          def score(f):
+              v = [int(x) for x in f.parent.name.split('.') if x.isdecimal()]
+              return (tuple(v), f.stat().st_size)
+          chosen = max(found, key=score)
+          Path('tmod_path.txt').write_text(str(chosen), encoding='utf-8')
+          print('Selected:',chosen)
+          PY
+      - name: Install Pillow
+        run: python3 -m pip install --user pillow
+      - name: Extract exact tmod assets and binaries
+        run: python3 extract_tmod.py "$(cat tmod_path.txt)" Extraido
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Install ILSpy
+        run: dotnet tool install --global ilspycmd --version 11.2.0.10050
+      - name: Decompile all classes to organized CSharp project
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p CSharp_Descompilado
+          dll="$(python3 -c 'import json; print(json.load(open("Extraido/Relatorio_Extracao.json"))["dll_principal"])')"
+          "$HOME/.dotnet/tools/ilspycmd" --disable-updatecheck --ignore-decompilation-errors --use-varnames-from-pdb --nested-directories -p -o CSharp_Descompilado "$dll" > ilspy_stdout.log 2> ilspy_stderr.log
+          test "$(find CSharp_Descompilado -type f -name '*.cs' | wc -l)" -gt 0
+      - name: Package CSharp with reports
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import json, zipfile
+          files = sorted(Path('CSharp_Descompilado').rglob('*.cs'))
+          report = json.loads(Path('Extraido/Relatorio_Extracao.json').read_text('utf-8'))
+          report['arquivos_csharp_descompilados'] = len(files)
+          report['linhas_csharp_aproximadas'] = sum(p.read_text('utf-8', errors='replace').count('\n')+1 for p in files)
+          report['ilspy'] = 'ilspycmd 11.2.0.10050'
+          report['notas'] = 'Codigo CSharp reconstruido da DLL, nao fontes originais do desenvolvedor.'
+          Path('Relatorio_Final.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
+          with zipfile.ZipFile('Elaina_CSharp_ILSpy.zip','w',zipfile.ZIP_DEFLATED,compresslevel=6) as z:
+              for p in Path('CSharp_Descompilado').rglob('*'):
+                  if p.is_file(): z.write(p)
+              z.write('Relatorio_Final.json')
+              for name in ('ilspy_stderr.log','ilspy_stdout.log'):
+                  p=Path(name)
+                  if p.is_file(): z.write(p)
+          print(json.dumps({
+              'nome':report['nome_interno'],
+              'mod_version':report['versao_mod'],
+              'tmodloader_version':report['versao_tmodloader'],
+              'files_tmod':report['total_arquivos_tmod'],
+              'csharp_files':report['arquivos_csharp_descompilados'],
+              'lines':report['linhas_csharp_aproximadas'],
+              'pngs':report['texturas_png'],
+              'extras':report['recursos_extras'],
+              'sources_embedded':report['fontes_embutidas'],
+              'failed_images':len(report['imagens_nao_convertidas']),
+          }, ensure_ascii=False, indent=2))
+          PY
+      - name: Upload CSharp decompiled
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Elaina-2850199955-CSharp-ILSpy
+          retention-days: 7
+          if-no-files-found: warn
+          path: |
+            Elaina_CSharp_ILSpy.zip
+            Relatorio_Final.json
+            Extraido/Relatorio_Extracao.json
+            ilspy_stdout.log
+            ilspy_stderr.log
+            steamcmd.log
+      - name: Upload textures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Elaina-2850199955-Texturas-PNG
+          retention-days: 7
+          path: Extraido/Texturas_PNG.zip
+      - name: Upload other resources
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Elaina-2850199955-Recursos-Extras
+          retention-days: 7
+          path: Extraido/Recursos_Extras.zip
+      - name: Upload embedded original source files when present
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Elaina-2850199955-Fontes-Inclusas
+          retention-days: 7
+          path: Extraido/Fontes_Inclusas.zip
