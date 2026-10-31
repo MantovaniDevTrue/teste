@@ -15,7 +15,7 @@ MAX_ENTRY_BYTES = 512 * 1024 * 1024
 def parse_tmod(path):
     source = Path(path).read_bytes()
     if source[:5] != b"TMOD\n":
-        raise ValueError("Cabecalho TMOD invalido")
+        raise ValueError("Cabecalho TMOD invalido: " + source[:64].hex(" ") + " repr=" + repr(source[:32]))
     tml_version = source[5:15].decode("ascii", errors="replace").rstrip("\0")
     position = 295
 
